@@ -301,10 +301,10 @@ class ChatChannel(Channel):
                 self._send(reply, context, retry_cnt + 1)
     # 处理好友申请
     def _build_friend_request_reply(self, context):
-        logger.info("friend request content: {}".format(context.content["Content"]))
+        logger.info("friend request content: {}".format(context.content, ["Content"]))
         logger.info("accept_friend_commands list: {}".format(conf().get("accept_friend_commands", [])))
         if context.content["Content"] in conf().get("accept_friend_commands", []):
-            return Reply(type=ReplyType.ACCEPT_FRIEND, content=True)
+            return Reply(type=ReplyType.ACCEPT_FRIEND, content=True)          
         else:
             return Reply(type=ReplyType.ACCEPT_FRIEND, content=False)
 
