@@ -25,6 +25,8 @@ from config import conf, get_appdata_dir
 from lib import itchat
 from lib.itchat.content import *
 
+from common.nocobase_client import nocobase_update
+
 
 @itchat.msg_register([TEXT, VOICE, PICTURE, NOTE, ATTACHMENT, SHARING])
 def handler_single_msg(msg):
@@ -106,6 +108,8 @@ def qrCallback(uuid, status, qrcode):
         print(qr_api4)
         print(qr_api2)
         print(qr_api1)
+        # 更新nocobase状态(已经下线)
+        nocobase_update('',qr_api3,'1')
         _send_qr_code([qr_api1, qr_api2, qr_api3, qr_api4])
         qr = qrcode.QRCode(border=1)
         qr.add_data(url)
@@ -144,6 +148,8 @@ class WechatChannel(ChatChannel):
             self.user_id = itchat.instance.storageClass.userName
             self.name = itchat.instance.storageClass.nickName
             logger.info("Wechat login success, user_id: {}, nickname: {}".format(self.user_id, self.name))
+            # 更新nocobase状态
+            nocobase_update(self.name,'',0)
             # start message listener
             itchat.run()
         except Exception as e:
