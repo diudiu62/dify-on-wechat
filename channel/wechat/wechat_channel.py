@@ -121,6 +121,11 @@ class WechatChannel(ChatChannel):
         super().__init__()
         self.receivedMsgs = ExpiredDict(60 * 60)
         self.auto_login_times = 0
+    
+    # 个人微信掉线后重启，推荐配合hot_reload
+    def logout_callback(self):
+        print('Logout')
+        self.startup()
 
     def startup(self):
         try:
@@ -133,7 +138,7 @@ class WechatChannel(ChatChannel):
                 hotReload=hotReload,
                 statusStorageDir=status_path,
                 qrCallback=qrCallback,
-                exitCallback=self.exitCallback,
+                exitCallback=self.logout_callback,
                 loginCallback=self.loginCallback
             )
             self.user_id = itchat.instance.storageClass.userName
