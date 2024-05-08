@@ -315,7 +315,7 @@ class WechatChannel(ChatChannel):
                 if group_id is None:
                     raise ValueError("The specified group chat was not found: {}".format(chatroomUserName))
                 # 调用 itchat 的 add_member_into_chatroom 方法来添加成员
-                debug_msg = itchat.add_member_into_chatroom(group_id, receiver)
+                debug_msg = itchat.add_member_into_chatroom(group_id, receiver, True)
                 logger.debug("[WX] add_member_into_chatroom return: {}".format(debug_msg))
                 logger.info("[WX] invite members={}, to chatroom={}".format(receiver, chatroomUserName))
             except ValueError as ve:
