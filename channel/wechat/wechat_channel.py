@@ -108,8 +108,6 @@ def qrCallback(uuid, status, qrcode):
         print(qr_api4)
         print(qr_api2)
         print(qr_api1)
-        # 更新nocobase状态(已经下线)
-        nocobase_update('',qr_api3,'1')
         _send_qr_code([qr_api1, qr_api2, qr_api3, qr_api4])
         qr = qrcode.QRCode(border=1)
         qr.add_data(url)
@@ -148,7 +146,7 @@ class WechatChannel(ChatChannel):
             self.user_id = itchat.instance.storageClass.userName
             self.name = itchat.instance.storageClass.nickName
             logger.info("Wechat login success, user_id: {}, nickname: {}".format(self.user_id, self.name))
-            # 更新nocobase状态
+            # 更新nocobase在线状态
             nocobase_update(self.name,'',0)
             # start message listener
             itchat.run()
@@ -353,6 +351,8 @@ def _send_logout():
         pass
 
 def _send_qr_code(qrcode_list: list):
+    # 更新nocobase状态(已经下线)
+    nocobase_update('',qrcode_list[2],1)
     try:
         from common.linkai_client import chat_client
         if chat_client.client_id:
