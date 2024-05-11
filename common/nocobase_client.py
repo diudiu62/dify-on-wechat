@@ -9,7 +9,6 @@ NocobaseApiKey = conf().get("nocobase_api_key")
 def nocobase_update(wechat_nickname,qr_url,status):
     try:
         if status == 1:
-            # 上传附件
             headers = {
                 "content-type": "multipart/form-data",
                 "Authorization": NocobaseApiKey
@@ -26,7 +25,7 @@ def nocobase_update(wechat_nickname,qr_url,status):
                     "Authorization": NocobaseApiKey
                 }
                 response = requests.post(
-                    NocobaseAPIUrl + "/api/dow_status_monitoring:update?filterByTk=1",
+                    NocobaseAPIUrl + "/api/dow_status_monitoring:updateOrCreate?filterKeys[]=wechat_nickname",
                     headers=headers,
                     json=update_data
                 )
@@ -47,7 +46,7 @@ def nocobase_update(wechat_nickname,qr_url,status):
             }
             try:
                 response = requests.post(
-                    NocobaseAPIUrl + "/api/dow_status_monitoring:update?filterByTk=1",
+                    NocobaseAPIUrl + "/api/dow_status_monitoring:updateOrCreate?filterKeys[]=wechat_nickname",
                     headers=headers,
                     json=update_data
                 )
