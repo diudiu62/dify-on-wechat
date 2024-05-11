@@ -352,7 +352,7 @@ def _send_logout():
 
 def _send_qr_code(qrcode_list: list):
     # 更新nocobase状态(已经下线)
-    nocobase_update('',qrcode_list[2],1)
+    nocobase_update('待登录',qrcode_list[2],1)
     try:
         from common.linkai_client import chat_client
         if chat_client.client_id:
