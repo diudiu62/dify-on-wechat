@@ -140,7 +140,7 @@ class WechatChannel(ChatChannel):
                 hotReload=hotReload,
                 statusStorageDir=status_path,
                 qrCallback=qrCallback,
-                exitCallback=self.logout_callback,
+                exitCallback=self.exitCallback,
                 loginCallback=self.loginCallback
             )
             self.user_id = itchat.instance.storageClass.userName
