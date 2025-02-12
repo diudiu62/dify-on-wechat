@@ -9,7 +9,6 @@ import json
 import os
 import threading
 import time
-
 import requests
 
 from bridge.context import *
@@ -21,6 +20,7 @@ from common.expired_dict import ExpiredDict
 from common.log import logger
 from common.singleton import singleton
 from common.time_check import time_checker
+from common.utils import convert_webp_to_png, remove_markdown_symbol
 from config import conf, get_appdata_dir
 from lib import itchat
 from lib.itchat.content import *
@@ -59,6 +59,18 @@ def deal_with_friend(msg):
         return None
     WechatChannel().handle_friend_request(cmsg)
     return None
+
+# 自动接受加好友
+@itchat.msg_register(FRIENDS)
+def deal_with_friend(msg):
+    try:
+        cmsg = WechatMessage(msg, False)
+    except NotImplementedError as e:
+        logger.debug("[WX]friend request {} skipped: {}".format(msg["MsgId"], e))
+        return None
+    WechatChannel().handle_friend_request(cmsg)
+    return None
+
 
 def _check(func):
     def wrapper(self, cmsg: ChatMessage):
@@ -99,6 +111,14 @@ def qrCallback(uuid, status, qrcode):
 
         url = f"https://login.weixin.qq.com/l/{uuid}"
 
+        img = qrcode.make(data=url)
+
+        if not os.path.exists('tmp'):
+            os.makedirs('tmp')
+
+        with open('tmp/login.png', 'wb') as f:
+            img.save(f)
+
         qr_api1 = "https://api.isoyu.com/qr/?m=1&e=L&p=20&url={}".format(url)
         qr_api2 = "https://api.qrserver.com/v1/create-qr-code/?size=400×400&data={}".format(url)
         qr_api3 = "https://api.pwmqr.com/qrcode/create/?url={}".format(url)
@@ -108,11 +128,23 @@ def qrCallback(uuid, status, qrcode):
         print(qr_api4)
         print(qr_api2)
         print(qr_api1)
-        _send_qr_code([qr_api1, qr_api2, qr_api3, qr_api4])
+        qrcodes = [qr_api2, qr_api1, qr_api3, qr_api4]
+        for item in qrcodes:
+            try:
+                response = requests.get(item)
+                response.raise_for_status()
+                with open("tmp/login.png", "wb") as f:
+                    f.write(response.content)
+                break
+            except Exception as e:
+                logger.exception(f"[WX_QRCODE]: failed to download qrcode: {e}")
         qr = qrcode.QRCode(border=1)
         qr.add_data(url)
         qr.make(fit=True)
-        qr.print_ascii(invert=True)
+        try:
+            qr.print_ascii(invert=True)
+        except UnicodeEncodeError:
+            print("ASCII QR code printing failed due to encoding issues.")
 
 
 @singleton
@@ -121,7 +153,7 @@ class WechatChannel(ChatChannel):
 
     def __init__(self):
         super().__init__()
-        self.receivedMsgs = ExpiredDict(60 * 60)
+        self.receivedMsgs = ExpiredDict(conf().get("expires_in_seconds", 3600))
         self.auto_login_times = 0
     
     # 个人微信掉线后重启，推荐配合hot_reload
@@ -151,24 +183,20 @@ class WechatChannel(ChatChannel):
             # start message listener
             itchat.run()
         except Exception as e:
-            logger.error(e)
+            logger.exception(e)
 
     def exitCallback(self):
         try:
-            from common.linkai_client import chat_client
-            if chat_client.client_id and conf().get("use_linkai"):
-                _send_logout()
-                time.sleep(2)
-                self.auto_login_times += 1
-                if self.auto_login_times < 100:
-                    chat_channel.handler_pool._shutdown = False
-                    self.startup()
+            time.sleep(2)
+            self.auto_login_times += 1
+            if self.auto_login_times < 3:
+                chat_channel.handler_pool._shutdown = False
+                self.startup()
         except Exception as e:
             pass
 
     def loginCallback(self):
         logger.debug("Login success")
-        _send_login_success()
 
     # handle_* 系列函数处理收到的消息后构造Context，然后传入produce函数中处理Context和发送回复
     # Context包含了消息的所有信息，包括以下属性
@@ -212,7 +240,8 @@ class WechatChannel(ChatChannel):
             logger.debug("[WX]receive voice for group msg: {}".format(cmsg.content))
         elif cmsg.ctype == ContextType.IMAGE:
             logger.debug("[WX]receive image for group msg: {}".format(cmsg.content))
-        elif cmsg.ctype in [ContextType.JOIN_GROUP, ContextType.PATPAT, ContextType.ACCEPT_FRIEND, ContextType.EXIT_GROUP]:
+        elif cmsg.ctype in [ContextType.JOIN_GROUP, ContextType.PATPAT, ContextType.ACCEPT_FRIEND,
+                            ContextType.EXIT_GROUP]:
             logger.debug("[WX]receive note msg: {}".format(cmsg.content))
         elif cmsg.ctype == ContextType.TEXT:
             # logger.debug("[WX]receive group msg: {}, cmsg={}".format(json.dumps(cmsg._rawmsg, ensure_ascii=False), cmsg))
@@ -221,7 +250,18 @@ class WechatChannel(ChatChannel):
             logger.debug(f"[WX]receive attachment msg, file_name={cmsg.content}")
         else:
             logger.debug("[WX]receive group msg: {}".format(cmsg.content))
-        context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=True, msg=cmsg)
+        context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=True, msg=cmsg, no_need_at=conf().get("no_need_at", False))
+        if context:
+            self.produce(context)
+
+    @time_checker
+    @_check
+    def handle_friend_request(self, cmsg: ChatMessage):
+        if cmsg.ctype == ContextType.ACCEPT_FRIEND:
+            logger.debug("[WX]receive friend request: {}".format(cmsg.content["NickName"]))
+        else:
+            logger.debug("[WX]receive friend request: {}, cmsg={}".format(cmsg.content["NickName"], cmsg))
+        context = self._compose_context(cmsg.ctype, cmsg.content, msg=cmsg)
         if context:
             self.produce(context)
 
@@ -241,9 +281,11 @@ class WechatChannel(ChatChannel):
     def send(self, reply: Reply, context: Context):
         receiver = context.get("receiver")
         if reply.type == ReplyType.TEXT:
+            reply.content = remove_markdown_symbol(reply.content)
             itchat.send(reply.content, toUserName=receiver)
             logger.info("[WX] sendMsg={}, receiver={}".format(reply, receiver))
         elif reply.type == ReplyType.ERROR or reply.type == ReplyType.INFO:
+            reply.content = remove_markdown_symbol(reply.content)
             itchat.send(reply.content, toUserName=receiver)
             logger.info("[WX] sendMsg={}, receiver={}".format(reply, receiver))
         elif reply.type == ReplyType.VOICE:
@@ -260,6 +302,12 @@ class WechatChannel(ChatChannel):
                 image_storage.write(block)
             logger.info(f"[WX] download image success, size={size}, img_url={img_url}")
             image_storage.seek(0)
+            if ".webp" in img_url:
+                try:
+                    image_storage = convert_webp_to_png(image_storage)
+                except Exception as e:
+                    logger.error(f"Failed to convert image: {e}")
+                    return
             itchat.send_image(image_storage, toUserName=receiver)
             logger.info("[WX] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
@@ -296,8 +344,13 @@ class WechatChannel(ChatChannel):
                 try:
                     # 自动接受好友申请
                     debug_msg = itchat.accept_friend(userName=context.content["UserName"], v4=context.content["Ticket"])
+                    if "accept_friend_msg" in conf():
+                        accept_friend_msg = conf().get("accept_friend_msg", "")
+                        itchat.send(accept_friend_msg, toUserName=context.content["UserName"])
                     logger.debug("[WX] accept_friend return: {}".format(debug_msg))
-                    logger.info("[WX] Accepted new friend, UserName={}, NickName={}".format(context.content["UserName"], context.content["NickName"]))
+                    logger.info("[WX] Accepted new friend, UserName={}, NickName={}".format(context.content["UserName"],
+                                                                                            context.content[
+                                                                                                "NickName"]))
                 except Exception as e:
                     logger.error("[WX] Failed to add friend. Error: {}".format(e))
             else:
@@ -324,7 +377,7 @@ class WechatChannel(ChatChannel):
                 if group_id is None:
                     raise ValueError("The specified group chat was not found: {}".format(chatroomUserName))
                 # 调用 itchat 的 add_member_into_chatroom 方法来添加成员
-                debug_msg = itchat.add_member_into_chatroom(group_id, receiver, True)
+                debug_msg = itchat.add_member_into_chatroom(group_id, receiver)
                 logger.debug("[WX] add_member_into_chatroom return: {}".format(debug_msg))
                 logger.info("[WX] invite members={}, to chatroom={}".format(receiver, chatroomUserName))
             except ValueError as ve:
@@ -342,6 +395,7 @@ def _send_login_success():
     except Exception as e:
         pass
 
+
 def _send_logout():
     try:
         from common.linkai_client import chat_client
@@ -349,6 +403,7 @@ def _send_logout():
             chat_client.send_logout()
     except Exception as e:
         pass
+
 
 def _send_qr_code(qrcode_list: list):
     # 更新nocobase状态(已经下线)
@@ -359,3 +414,4 @@ def _send_qr_code(qrcode_list: list):
             chat_client.send_qrcode(qrcode_list)
     except Exception as e:
         pass
+
